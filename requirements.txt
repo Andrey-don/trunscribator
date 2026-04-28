@@ -1,0 +1,4 @@
+openai-whisper
+scenedetect[opencv]
+customtkinter
+opencv-python
