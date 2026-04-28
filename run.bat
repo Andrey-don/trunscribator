@@ -7,4 +7,4 @@ if not exist .venv (
     exit /b 1
 )
 
-.venv\Scripts\python main.py
+start "" .venv\Scripts\pythonw.exe main.py
