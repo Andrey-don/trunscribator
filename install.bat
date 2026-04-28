@@ -1,90 +1,72 @@
 @echo off
-chcp 65001 > nul
-title Установка Транскрибатора
+title Trunscribator Setup
+
 echo.
-echo  ============================================
-echo   Транскрибатор — установка
-echo  ============================================
+echo  === Trunscribator: setup ===
 echo.
 
-REM ── Проверка Python ──────────────────────────────────────────────────────
+REM ── Check Python ─────────────────────────────────────────────────────────
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo  [ОШИБКА] Python не найден.
-    echo.
-    echo  Скачайте Python 3.10 или новее:
-    echo  https://www.python.org/downloads/
-    echo.
-    echo  При установке поставьте галочку "Add Python to PATH"
+    echo  [ERROR] Python not found.
+    echo  Download Python 3.10+ from: https://www.python.org/downloads/
+    echo  During install, check "Add Python to PATH"
     pause
     exit /b 1
 )
 for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
 echo  [OK] Python %PYVER%
 
-REM ── Проверка / установка ffmpeg ──────────────────────────────────────────
+REM ── Check / install ffmpeg ────────────────────────────────────────────────
 ffmpeg -version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo  [..] ffmpeg не найден. Устанавливаю через winget...
+    echo  [..] ffmpeg not found. Installing via winget...
     winget install --id Gyan.FFmpeg -h --accept-package-agreements --accept-source-agreements
     if %errorlevel% neq 0 (
-        echo.
-        echo  [ПРЕДУПРЕЖДЕНИЕ] ffmpeg не удалось установить автоматически.
-        echo  Скачайте вручную: https://ffmpeg.org/download.html
-        echo  и добавьте папку bin\ в переменную PATH.
-        echo.
+        echo  [WARN] Could not install ffmpeg automatically.
+        echo  Download manually: https://ffmpeg.org/download.html
+        echo  Add the bin\ folder to PATH.
         pause
     ) else (
-        echo  [OK] ffmpeg установлен
+        echo  [OK] ffmpeg installed
     )
 ) else (
-    echo  [OK] ffmpeg найден
+    echo  [OK] ffmpeg found
 )
 
-REM ── Создание виртуального окружения ─────────────────────────────────────
+REM ── Create virtual environment ────────────────────────────────────────────
 if exist .venv (
-    echo  [OK] Виртуальное окружение уже существует
+    echo  [OK] Virtual environment already exists
 ) else (
-    echo  [..] Создаю виртуальное окружение...
+    echo  [..] Creating virtual environment...
     python -m venv .venv
     if %errorlevel% neq 0 (
-        echo  [ОШИБКА] Не удалось создать venv
+        echo  [ERROR] Failed to create venv
         pause
         exit /b 1
     )
-    echo  [OK] Виртуальное окружение создано
+    echo  [OK] Virtual environment created
 )
 
-REM ── Установка зависимостей ───────────────────────────────────────────────
-echo  [..] Устанавливаю зависимости (может занять 3-5 минут)...
+REM ── Install dependencies ──────────────────────────────────────────────────
+echo  [..] Installing dependencies (3-5 min)...
 .venv\Scripts\pip install --quiet --upgrade pip
 .venv\Scripts\pip install --quiet -r requirements.txt
 if %errorlevel% neq 0 (
-    echo  [ОШИБКА] Не удалось установить зависимости
+    echo  [ERROR] Failed to install dependencies
     pause
     exit /b 1
 )
-echo  [OK] Зависимости установлены
+echo  [OK] Dependencies installed
 
-REM ── Ярлык на рабочем столе ───────────────────────────────────────────────
-set SHORTCUT_PATH=%USERPROFILE%\Desktop\Транскрибатор.lnk
+REM ── Desktop shortcut ──────────────────────────────────────────────────────
+set SHORTCUT=%USERPROFILE%\Desktop\Trunscribator.lnk
 set APP_DIR=%~dp0
-powershell -NoProfile -Command ^
-  "$ws = New-Object -ComObject WScript.Shell; ^
-   $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); ^
-   $s.TargetPath = '%APP_DIR%run.bat'; ^
-   $s.WorkingDirectory = '%APP_DIR%'; ^
-   $s.IconLocation = 'shell32.dll,21'; ^
-   $s.Description = 'Транскрибатор видео'; ^
-   $s.Save()" >nul 2>&1
-if exist "%SHORTCUT_PATH%" (
-    echo  [OK] Ярлык создан на рабочем столе
-)
+powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut('%SHORTCUT%'); $s.TargetPath='%APP_DIR%run.bat'; $s.WorkingDirectory='%APP_DIR%'; $s.IconLocation='shell32.dll,21'; $s.Save()" >nul 2>&1
+if exist "%SHORTCUT%" echo  [OK] Desktop shortcut created
 
 echo.
-echo  ============================================
-echo   Установка завершена!
-echo   Запуск: run.bat  или ярлык на рабочем столе
-echo  ============================================
+echo  === Setup complete! ===
+echo  Run the app: run.bat or desktop shortcut
 echo.
 pause
