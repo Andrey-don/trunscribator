@@ -1,7 +1,5 @@
 import os
 import threading
-import subprocess
-import sys
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -22,14 +20,19 @@ WHISPER_MODELS = {
     "large  — лучшее качество, медленно": "large",
 }
 
-FALLBACK_INTERVAL_SEC = 30  # если сцен не найдено — скриншот каждые N секунд
+FALLBACK_INTERVAL_SEC = 30
+
+# Чувствительность 1..10 → порог ContentDetector (чем ниже порог, тем больше сцен)
+def _sensitivity_to_threshold(s: float) -> float:
+    # s=1 → 30.0 (мало), s=5 → 10.0 (средне), s=10 → 2.0 (много)
+    return round(32.0 / s, 1)
 
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Транскрибатор")
-        self.geometry("700x560")
+        self.geometry("700x620")
         self.resizable(False, False)
         self.video_path = None
         self._build_ui()
@@ -37,7 +40,6 @@ class App(ctk.CTk):
     # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Заголовок
         ctk.CTkLabel(self, text="Транскрибатор видео", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 5))
 
         # Выбор файла
@@ -47,15 +49,30 @@ class App(ctk.CTk):
         self.path_label = ctk.CTkLabel(file_frame, text="Файл не выбран", anchor="w", width=480)
         self.path_label.pack(side="left", padx=5)
 
-        # Выбор модели
+        # Выбор модели Whisper
         model_frame = ctk.CTkFrame(self)
         model_frame.pack(fill="x", padx=20, pady=4)
         ctk.CTkLabel(model_frame, text="Модель Whisper:", width=140).pack(side="left", padx=10, pady=10)
         self.model_var = ctk.StringVar(value=list(WHISPER_MODELS.keys())[1])
         ctk.CTkOptionMenu(model_frame, variable=self.model_var, values=list(WHISPER_MODELS.keys()), width=360).pack(side="left", padx=5)
 
+        # Чувствительность скриншотов
+        sens_frame = ctk.CTkFrame(self)
+        sens_frame.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(sens_frame, text="Скриншотов:", width=140).pack(side="left", padx=10, pady=10)
+        ctk.CTkLabel(sens_frame, text="мало").pack(side="left")
+        self.sens_slider = ctk.CTkSlider(sens_frame, from_=1, to=10, number_of_steps=9, width=260,
+                                         command=self._on_slider)
+        self.sens_slider.set(5)
+        self.sens_slider.pack(side="left", padx=8)
+        ctk.CTkLabel(sens_frame, text="много").pack(side="left")
+        self.sens_label = ctk.CTkLabel(sens_frame, text=f"порог: {_sensitivity_to_threshold(5)}", width=90,
+                                       text_color="gray")
+        self.sens_label.pack(side="left", padx=8)
+
         # Кнопка обработки
-        self.process_btn = ctk.CTkButton(self, text="Обработать", height=40, font=ctk.CTkFont(size=15, weight="bold"),
+        self.process_btn = ctk.CTkButton(self, text="Обработать", height=40,
+                                         font=ctk.CTkFont(size=15, weight="bold"),
                                          command=self.start_processing, state="disabled")
         self.process_btn.pack(padx=20, pady=10)
 
@@ -71,6 +88,10 @@ class App(ctk.CTk):
         # Лог
         self.log_box = ctk.CTkTextbox(self, height=220, font=ctk.CTkFont(family="Courier New", size=12))
         self.log_box.pack(fill="both", expand=True, padx=20, pady=(4, 20))
+
+    def _on_slider(self, value):
+        t = _sensitivity_to_threshold(float(value))
+        self.sens_label.configure(text=f"порог: {t}")
 
     # ── Действия ────────────────────────────────────────────────────────────
 
@@ -102,8 +123,7 @@ class App(ctk.CTk):
 
             # ── Шаг 1: транскрибация ────────────────────────────────────
             self._ui(lambda: self.status_label.configure(text="Шаг 1/2 — Транскрибация..."))
-            model_key = self.model_var.get()
-            model_name = WHISPER_MODELS[model_key]
+            model_name = WHISPER_MODELS[self.model_var.get()]
             self._log(f"Загрузка модели Whisper «{model_name}»...")
             model = whisper.load_model(model_name)
             self._log("Транскрибация видео (может занять несколько минут)...")
@@ -117,18 +137,17 @@ class App(ctk.CTk):
 
             # ── Шаг 2: скриншоты по сценам ──────────────────────────────
             self._ui(lambda: self.status_label.configure(text="Шаг 2/2 — Определение сцен..."))
-            self._log("Анализ смены кадров...")
+            threshold = _sensitivity_to_threshold(self.sens_slider.get())
+            self._log(f"Анализ смены кадров (порог {threshold})...")
 
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            # Определяем сцены
-            scene_frames = self._detect_scenes(video_path)
+            scene_frames = self._detect_scenes(video_path, threshold)
 
             if not scene_frames:
-                # Запасной вариант: каждые FALLBACK_INTERVAL_SEC секунд
-                self._log(f"Сцены не найдены — делаем скриншот каждые {FALLBACK_INTERVAL_SEC} с.")
+                self._log(f"Сцены не найдены — скриншот каждые {FALLBACK_INTERVAL_SEC} с.")
                 interval = int(fps * FALLBACK_INTERVAL_SEC)
                 scene_frames = list(range(0, total_frames, interval))
 
@@ -138,10 +157,8 @@ class App(ctk.CTk):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                 ret, frame = cap.read()
                 if ret:
-                    img_path = os.path.join(out_dir, f"{i}.jpg")
-                    cv2.imwrite(img_path, frame)
-                progress = 0.5 + 0.5 * (i / len(scene_frames))
-                self._ui(lambda p=progress: self.progress.set(p))
+                    cv2.imwrite(os.path.join(out_dir, f"{i}.jpg"), frame)
+                self._ui(lambda p=0.5 + 0.5 * (i / len(scene_frames)): self.progress.set(p))
 
             cap.release()
             self._log(f"✓ Скриншоты сохранены в папку: {out_dir}")
@@ -163,14 +180,12 @@ class App(ctk.CTk):
         finally:
             self._ui(lambda: self.process_btn.configure(state="normal"))
 
-    def _detect_scenes(self, video_path: str) -> list[int]:
-        """Возвращает список номеров кадров начала каждой сцены."""
+    def _detect_scenes(self, video_path: str, threshold: float) -> list[int]:
         video = open_video(video_path)
         scene_manager = SceneManager()
-        scene_manager.add_detector(ContentDetector(threshold=27.0))
+        scene_manager.add_detector(ContentDetector(threshold=threshold))
         scene_manager.detect_scenes(video, show_progress=False)
-        scene_list = scene_manager.get_scene_list()
-        return [scene[0].get_frames() for scene in scene_list]
+        return [s[0].get_frames() for s in scene_manager.get_scene_list()]
 
     # ── Хелперы ─────────────────────────────────────────────────────────────
 
