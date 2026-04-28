@@ -34,7 +34,8 @@ echo  [OK] Extracted
 
 echo  [3/4] Moving to install folder...
 if exist "%INSTALL_DIR%" rd /s /q "%INSTALL_DIR%"
-powershell -NoProfile -Command "Move-Item -Path '%UNZIP_TMP%\trunscribator-main' -Destination '%INSTALL_DIR%'"
+rename "%UNZIP_TMP%\trunscribator-main" "Trunscribator"
+move /y "%UNZIP_TMP%\Trunscribator" "%USERPROFILE%\" >nul 2>&1
 if %errorlevel% neq 0 (
     echo  [ERROR] Move failed.
     pause
