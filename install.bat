@@ -50,7 +50,6 @@ if exist .venv (
 
 REM ── Install dependencies ──────────────────────────────────────────────────
 echo  [..] Installing dependencies (3-5 min)...
-.venv\Scripts\pip install --quiet --upgrade pip
 .venv\Scripts\pip install --quiet -r requirements.txt
 if %errorlevel% neq 0 (
     echo  [ERROR] Failed to install dependencies
