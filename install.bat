@@ -1,5 +1,6 @@
 @echo off
 title Trunscribator Setup
+cd /d "%~dp0"
 
 echo.
 echo  === Trunscribator: setup ===
