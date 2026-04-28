@@ -96,7 +96,7 @@ class App(ctk.CTk):
     def _worker(self):
         try:
             video_path = self.video_path
-            video_name = os.path.splitext(os.path.basename(video_path))[0]
+            video_name = os.path.splitext(os.path.basename(video_path))[0].strip()
             out_dir = os.path.join(os.path.dirname(video_path), video_name)
             os.makedirs(out_dir, exist_ok=True)
 
