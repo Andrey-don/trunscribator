@@ -14,8 +14,7 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
-echo  [OK] Python %PYVER%
+echo  [OK] Python found
 
 REM ── Check / install ffmpeg ────────────────────────────────────────────────
 ffmpeg -version >nul 2>&1
