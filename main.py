@@ -127,7 +127,7 @@ class App(ctk.CTk):
             self._log(f"Загрузка модели Whisper «{model_name}»...")
             model = whisper.load_model(model_name)
             self._log("Транскрибация видео (может занять несколько минут)...")
-            result = model.transcribe(video_path, verbose=False)
+            result = model.transcribe(video_path, verbose=None)
 
             txt_path = os.path.join(out_dir, f"{video_name}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
