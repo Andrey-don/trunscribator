@@ -13,8 +13,6 @@ import cv2
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
 import whisper
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
 
 
 ctk.set_appearance_mode("dark")
@@ -64,50 +62,6 @@ def _group_segments(segments: list, interval: int = TEXT_INTERVAL_SEC) -> list:
         for t, texts in sorted(buckets.items())
     ]
 
-
-def _generate_word(out_dir: str, video_name: str, chunks: list, screenshots: list) -> str:
-    doc = Document()
-
-    title_p = doc.add_paragraph()
-    title_run = title_p.add_run(video_name)
-    title_run.bold = True
-    title_run.font.size = Pt(16)
-    title_run.font.color.rgb = RGBColor(0, 0, 0)
-
-    events = []
-    for c in chunks:
-        events.append({"t": c["time_sec"], "type": "text", "data": c})
-    for s in screenshots:
-        events.append({"t": s["time_sec"], "type": "shot", "data": s})
-    events.sort(key=lambda e: e["t"])
-
-    for ev in events:
-        if ev["type"] == "shot":
-            shot = ev["data"]
-            img_path = os.path.join(out_dir, shot["filename"])
-            if os.path.exists(img_path):
-                p = doc.add_paragraph()
-                p.alignment = 1
-                p.add_run().add_picture(img_path, width=Inches(5.5))
-            cap = doc.add_paragraph()
-            cap.alignment = 1
-            cap_run = cap.add_run(shot["label"])
-            cap_run.bold = True
-            cap_run.font.size = Pt(9)
-            cap_run.font.color.rgb = RGBColor(0, 0, 0)
-        else:
-            chunk = ev["data"]
-            p = doc.add_paragraph()
-            r1 = p.add_run(f"{chunk['label']}: ")
-            r1.bold = True
-            r1.font.color.rgb = RGBColor(0, 0, 0)
-            r2 = p.add_run(chunk["text"])
-            r2.font.color.rgb = RGBColor(0, 0, 0)
-
-    docx_path = os.path.join(out_dir, f"{video_name}.docx")
-    doc.save(docx_path)
-    file_size = os.path.getsize(docx_path)
-    return docx_path, file_size
 
 
 def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: list) -> str:
@@ -171,7 +125,7 @@ class App(ctk.CTk):
 
     def _build_ui(self):
         ctk.CTkLabel(self, text="Транскрибатор 2", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 5))
-        ctk.CTkLabel(self, text="Тайминг каждые 10 сек • Скриншоты по времени • Word-документ",
+        ctk.CTkLabel(self, text="Тайминг каждые 10 сек • Скриншоты по времени • HTML-документ",
                      font=ctk.CTkFont(size=12), text_color="gray").pack(pady=(0, 8))
 
         file_frame = ctk.CTkFrame(self)
@@ -307,21 +261,11 @@ class App(ctk.CTk):
                 json.dump(manifest, f, ensure_ascii=False, indent=2)
             self._ui(lambda: self.progress.set(0.7))
 
-            # ── Шаг 3: документы ─────────────────────────────────────────
-            self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — Документы..."))
-            self._log(f"Данные: блоков={len(chunks)}, скриншотов={len(screenshots)}")
-
+            # ── Шаг 3: HTML-документ ─────────────────────────────────────
+            self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — HTML-документ..."))
             self._log("Генерация HTML-документа...")
             html_path = _generate_html(out_dir, video_name, chunks, screenshots)
             self._log(f"✓ HTML сохранён: {os.path.basename(html_path)}")
-
-            self._log("Генерация Word-документа...")
-            try:
-                docx_path, docx_size = _generate_word(out_dir, video_name, chunks, screenshots)
-                self._log(f"✓ Word сохранён: {os.path.basename(docx_path)} ({docx_size} байт)")
-            except Exception as docx_err:
-                docx_path = None
-                self._log(f"⚠ Word ошибка: {docx_err}")
 
             self._ui(lambda: self.progress.set(1.0))
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
@@ -339,9 +283,8 @@ class App(ctk.CTk):
                 f"Обработка завершена!\n\n"
                 f"Транскрипция: {os.path.basename(txt_path)}\n"
                 f"Скриншотов: {len(screenshots)}\n"
-                f"HTML-документ: {os.path.basename(html_path)}\n"
-                + (f"Word-документ: {os.path.basename(docx_path)}\n" if docx_path else "Word: ошибка генерации\n")
-                + f"\nПапка с результатами:\n{out_dir}"
+                f"HTML-документ: {os.path.basename(html_path)}\n\n"
+                f"Папка с результатами:\n{out_dir}"
             ))
 
         except Exception as e:
