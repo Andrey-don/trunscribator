@@ -1,5 +1,6 @@
 import os
 import json
+import html as html_mod
 import threading
 
 import customtkinter as ctk
@@ -101,7 +102,50 @@ def _generate_word(out_dir: str, video_name: str, chunks: list, screenshots: lis
 
     docx_path = os.path.join(out_dir, f"{video_name}.docx")
     doc.save(docx_path)
-    return docx_path
+    file_size = os.path.getsize(docx_path)
+    return docx_path, file_size
+
+
+def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: list) -> str:
+    events = []
+    for c in chunks:
+        events.append({"t": c["time_sec"], "type": "text", "data": c})
+    for s in screenshots:
+        events.append({"t": s["time_sec"], "type": "shot", "data": s})
+    events.sort(key=lambda e: e["t"])
+
+    parts = [
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+        f"<title>{html_mod.escape(video_name)}</title>",
+        "<style>",
+        "body{font-family:Arial,sans-serif;max-width:820px;margin:40px auto;background:#fff;color:#111;line-height:1.6;}",
+        "h1{font-size:22px;margin-bottom:24px;}",
+        "img{max-width:100%;display:block;margin:16px auto;border:1px solid #ddd;}",
+        ".lbl{text-align:center;font-size:11px;font-weight:bold;color:#555;margin:4px 0 20px;}",
+        ".row{margin:6px 0;} .ts{font-weight:bold;}",
+        "</style></head><body>",
+        f"<h1>{html_mod.escape(video_name)}</h1>",
+    ]
+
+    for ev in events:
+        if ev["type"] == "shot":
+            shot = ev["data"]
+            if os.path.exists(os.path.join(out_dir, shot["filename"])):
+                parts.append(f'<img src="{shot["filename"]}" alt="{html_mod.escape(shot["label"])}">')
+            parts.append(f'<div class="lbl">{html_mod.escape(shot["label"])}</div>')
+        else:
+            chunk = ev["data"]
+            parts.append(
+                f'<p class="row"><span class="ts">{html_mod.escape(chunk["label"])}:</span> '
+                f'{html_mod.escape(chunk["text"])}</p>'
+            )
+
+    parts.append("</body></html>")
+
+    html_path = os.path.join(out_dir, f"{video_name}.html")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(parts))
+    return html_path
 
 
 class App(ctk.CTk):
@@ -251,22 +295,32 @@ class App(ctk.CTk):
                 json.dump(manifest, f, ensure_ascii=False, indent=2)
             self._ui(lambda: self.progress.set(0.7))
 
-            # ── Шаг 3: Word ───────────────────────────────────────────────
-            self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — Word-документ..."))
-            self._log(f"Данные для Word: блоков={len(chunks)}, скриншотов={len(screenshots)}")
-            self._log("Генерация Word-документа...")
-            docx_path = _generate_word(out_dir, video_name, chunks, screenshots)
-            self._log(f"✓ Word сохранён: {os.path.basename(docx_path)}")
-            self._ui(lambda: self.progress.set(1.0))
+            # ── Шаг 3: документы ─────────────────────────────────────────
+            self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — Документы..."))
+            self._log(f"Данные: блоков={len(chunks)}, скриншотов={len(screenshots)}")
 
+            self._log("Генерация HTML-документа...")
+            html_path = _generate_html(out_dir, video_name, chunks, screenshots)
+            self._log(f"✓ HTML сохранён: {os.path.basename(html_path)}")
+
+            self._log("Генерация Word-документа...")
+            try:
+                docx_path, docx_size = _generate_word(out_dir, video_name, chunks, screenshots)
+                self._log(f"✓ Word сохранён: {os.path.basename(docx_path)} ({docx_size} байт)")
+            except Exception as docx_err:
+                docx_path = None
+                self._log(f"⚠ Word ошибка: {docx_err}")
+
+            self._ui(lambda: self.progress.set(1.0))
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
             self._ui(lambda: messagebox.showinfo(
                 "Готово",
                 f"Обработка завершена!\n\n"
                 f"Транскрипция: {os.path.basename(txt_path)}\n"
                 f"Скриншотов: {len(screenshots)}\n"
-                f"Word-документ: {os.path.basename(docx_path)}\n\n"
-                f"Папка с результатами:\n{out_dir}"
+                f"HTML-документ: {os.path.basename(html_path)}\n"
+                + (f"Word-документ: {os.path.basename(docx_path)}\n" if docx_path else "Word: ошибка генерации\n")
+                + f"\nПапка с результатами:\n{out_dir}"
             ))
 
         except Exception as e:
