@@ -153,6 +153,17 @@ class App(ctk.CTk):
                                        text_color="gray")
         self.sens_label.pack(side="left", padx=8)
 
+        toggle_frame = ctk.CTkFrame(self)
+        toggle_frame.pack(fill="x", padx=20, pady=4)
+        self.screenshots_switch = ctk.CTkSwitch(
+            toggle_frame, text="Скриншоты", width=140,
+            command=self._on_screenshots_toggle)
+        self.screenshots_switch.select()
+        self.screenshots_switch.pack(side="left", padx=20, pady=10)
+        self.html_switch = ctk.CTkSwitch(toggle_frame, text="HTML-отчёт")
+        self.html_switch.select()
+        self.html_switch.pack(side="left", padx=20, pady=10)
+
         self.process_btn = ctk.CTkButton(self, text="Обработать", height=40,
                                          font=ctk.CTkFont(size=15, weight="bold"),
                                          command=self.start_processing, state="disabled")
@@ -170,6 +181,10 @@ class App(ctk.CTk):
 
     def _on_slider(self, value):
         self.sens_label.configure(text=f"порог: {_sensitivity_to_threshold(float(value))}")
+
+    def _on_screenshots_toggle(self):
+        state = "normal" if self.screenshots_switch.get() else "disabled"
+        self.sens_slider.configure(state=state)
 
     def select_video(self):
         path = filedialog.askopenfilename(
@@ -191,12 +206,15 @@ class App(ctk.CTk):
     def _worker(self):
         try:
             video_path = self.video_path
+            do_screenshots = bool(self.screenshots_switch.get())
+            do_html = bool(self.html_switch.get())
+
             video_name = os.path.splitext(os.path.basename(video_path))[0].strip()
             out_dir = os.path.join(os.path.dirname(video_path), video_name + "_v2")
             os.makedirs(out_dir, exist_ok=True)
 
             # ── Шаг 1: транскрибация ─────────────────────────────────────
-            self._ui(lambda: self.status_label.configure(text="Шаг 1/3 — Транскрибация..."))
+            self._ui(lambda: self.status_label.configure(text="Транскрибация..."))
             model_name = WHISPER_MODELS[self.model_var.get()]
             self._log(f"Загрузка модели Whisper «{model_name}»...")
             model = whisper.load_model(model_name)
@@ -208,10 +226,8 @@ class App(ctk.CTk):
                 for s in result.get("segments", [])
             ]
 
-            # Группируем по 10-сек интервалам
             chunks = _group_segments(segments, TEXT_INTERVAL_SEC)
 
-            # Сохраняем текст с таймингами
             txt_path = os.path.join(out_dir, f"{video_name}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 for chunk in chunks:
@@ -221,51 +237,53 @@ class App(ctk.CTk):
             self._ui(lambda: self.progress.set(0.4))
 
             # ── Шаг 2: скриншоты ─────────────────────────────────────────
-            self._ui(lambda: self.status_label.configure(text="Шаг 2/3 — Скриншоты..."))
-            threshold = _sensitivity_to_threshold(self.sens_slider.get())
-            self._log(f"Анализ смены кадров (порог {threshold})...")
-
-            cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            scene_frames = self._detect_scenes(video_path, threshold)
-            if not scene_frames:
-                self._log(f"Сцены не найдены — скриншот каждые {FALLBACK_INTERVAL_SEC} с.")
-                interval = int(fps * FALLBACK_INTERVAL_SEC)
-                scene_frames = list(range(0, total_frames, interval))
-
-            self._log(f"Найдено сцен: {len(scene_frames)}")
-
             screenshots = []
-            for i, frame_num in enumerate(scene_frames, 1):
-                time_sec = frame_num / fps
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-                ret, frame = cap.read()
-                if ret:
-                    filename = _fmt_filename(time_sec)
-                    cv2.imwrite(os.path.join(out_dir, filename), frame)
-                    screenshots.append({
-                        "time_sec": round(time_sec, 2),
-                        "label": _fmt_label(time_sec),
-                        "filename": filename,
-                    })
-                self._ui(lambda p=0.4 + 0.3 * (i / len(scene_frames)): self.progress.set(p))
+            if do_screenshots:
+                self._ui(lambda: self.status_label.configure(text="Скриншоты..."))
+                threshold = _sensitivity_to_threshold(self.sens_slider.get())
+                self._log(f"Анализ смены кадров (порог {threshold})...")
 
-            cap.release()
-            self._log(f"✓ Скриншотов сохранено: {len(screenshots)}")
+                cap = cv2.VideoCapture(video_path)
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            # Сохраняем манифест
-            manifest = {"video": os.path.basename(video_path), "chunks": chunks, "screenshots": screenshots}
-            with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
-                json.dump(manifest, f, ensure_ascii=False, indent=2)
+                scene_frames = self._detect_scenes(video_path, threshold)
+                if not scene_frames:
+                    self._log(f"Сцены не найдены — скриншот каждые {FALLBACK_INTERVAL_SEC} с.")
+                    interval = int(fps * FALLBACK_INTERVAL_SEC)
+                    scene_frames = list(range(0, total_frames, interval))
+
+                self._log(f"Найдено сцен: {len(scene_frames)}")
+
+                for i, frame_num in enumerate(scene_frames, 1):
+                    time_sec = frame_num / fps
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                    ret, frame = cap.read()
+                    if ret:
+                        filename = _fmt_filename(time_sec)
+                        cv2.imwrite(os.path.join(out_dir, filename), frame)
+                        screenshots.append({
+                            "time_sec": round(time_sec, 2),
+                            "label": _fmt_label(time_sec),
+                            "filename": filename,
+                        })
+                    self._ui(lambda p=0.4 + 0.3 * (i / len(scene_frames)): self.progress.set(p))
+
+                cap.release()
+                self._log(f"✓ Скриншотов сохранено: {len(screenshots)}")
+            else:
+                self._log("Скриншоты отключены — пропущено.")
             self._ui(lambda: self.progress.set(0.7))
 
             # ── Шаг 3: HTML-документ ─────────────────────────────────────
-            self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — HTML-документ..."))
-            self._log("Генерация HTML-документа...")
-            html_path = _generate_html(out_dir, video_name, chunks, screenshots)
-            self._log(f"✓ HTML сохранён: {os.path.basename(html_path)}")
+            html_path = None
+            if do_html:
+                self._ui(lambda: self.status_label.configure(text="HTML-документ..."))
+                self._log("Генерация HTML-документа...")
+                html_path = _generate_html(out_dir, video_name, chunks, screenshots)
+                self._log(f"✓ HTML сохранён: {os.path.basename(html_path)}")
+            else:
+                self._log("HTML-отчёт отключён — пропущено.")
 
             self._ui(lambda: self.progress.set(1.0))
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
@@ -273,19 +291,19 @@ class App(ctk.CTk):
             # Открываем папку в Explorer
             subprocess.Popen(['explorer', os.path.normpath(out_dir)])
 
-            # Копируем HTML во временную папку с коротким ASCII-путём и открываем
-            temp_html = os.path.join(tempfile.gettempdir(), "trunscribator.html")
-            shutil.copy2(html_path, temp_html)
-            os.startfile(temp_html)
+            # Открываем HTML если сгенерирован
+            if html_path:
+                temp_html = os.path.join(tempfile.gettempdir(), "trunscribator.html")
+                shutil.copy2(html_path, temp_html)
+                os.startfile(temp_html)
 
-            self._ui(lambda: messagebox.showinfo(
-                "Готово",
-                f"Обработка завершена!\n\n"
+            result_lines = (
                 f"Транскрипция: {os.path.basename(txt_path)}\n"
                 f"Скриншотов: {len(screenshots)}\n"
-                f"HTML-документ: {os.path.basename(html_path)}\n\n"
-                f"Папка с результатами:\n{out_dir}"
-            ))
+                + (f"HTML-документ: {os.path.basename(html_path)}\n" if html_path else "")
+                + f"\nПапка с результатами:\n{out_dir}"
+            )
+            self._ui(lambda: messagebox.showinfo("Готово", f"Обработка завершена!\n\n{result_lines}"))
 
         except Exception as e:
             self._log(f"ОШИБКА: {e}")
