@@ -125,7 +125,7 @@ class App(ctk.CTk):
 
     def _build_ui(self):
         ctk.CTkLabel(self, text="Транскрибатор 2", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 5))
-        ctk.CTkLabel(self, text="Тайминг каждые 10 сек • Скриншоты по времени • HTML-документ",
+        ctk.CTkLabel(self, text="Транскрибация • Скриншоты • HTML-документ",
                      font=ctk.CTkFont(size=12), text_color="gray").pack(pady=(0, 8))
 
         file_frame = ctk.CTkFrame(self)
@@ -139,6 +139,18 @@ class App(ctk.CTk):
         ctk.CTkLabel(model_frame, text="Модель Whisper:", width=140).pack(side="left", padx=10, pady=10)
         self.model_var = ctk.StringVar(value=list(WHISPER_MODELS.keys())[1])
         ctk.CTkOptionMenu(model_frame, variable=self.model_var, values=list(WHISPER_MODELS.keys()), width=360).pack(side="left", padx=5)
+
+        text_frame = ctk.CTkFrame(self)
+        text_frame.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(text_frame, text="Текст каждые:", width=140).pack(side="left", padx=10, pady=10)
+        ctk.CTkLabel(text_frame, text="0 с").pack(side="left")
+        self.text_slider = ctk.CTkSlider(text_frame, from_=0, to=30, number_of_steps=6, width=260,
+                                         command=self._on_text_slider)
+        self.text_slider.set(10)
+        self.text_slider.pack(side="left", padx=8)
+        ctk.CTkLabel(text_frame, text="30 с").pack(side="left")
+        self.text_label = ctk.CTkLabel(text_frame, text="10 сек", width=60, text_color="gray")
+        self.text_label.pack(side="left", padx=8)
 
         sens_frame = ctk.CTkFrame(self)
         sens_frame.pack(fill="x", padx=20, pady=4)
@@ -179,6 +191,10 @@ class App(ctk.CTk):
         self.log_box = ctk.CTkTextbox(self, height=200, font=ctk.CTkFont(family="Courier New", size=12))
         self.log_box.pack(fill="both", expand=True, padx=20, pady=(4, 20))
 
+    def _on_text_slider(self, value):
+        v = int(round(value / 5) * 5)
+        self.text_label.configure(text="сегменты" if v == 0 else f"{v} сек")
+
     def _on_slider(self, value):
         self.sens_label.configure(text=f"порог: {_sensitivity_to_threshold(float(value))}")
 
@@ -208,6 +224,7 @@ class App(ctk.CTk):
             video_path = self.video_path
             do_screenshots = bool(self.screenshots_switch.get())
             do_html = bool(self.html_switch.get())
+            text_interval = int(round(self.text_slider.get() / 5) * 5)
 
             video_name = os.path.splitext(os.path.basename(video_path))[0].strip()
             out_dir = os.path.join(os.path.dirname(video_path), video_name + "_v2")
@@ -226,14 +243,21 @@ class App(ctk.CTk):
                 for s in result.get("segments", [])
             ]
 
-            chunks = _group_segments(segments, TEXT_INTERVAL_SEC)
+            if text_interval == 0:
+                chunks = [
+                    {"time_sec": s["start"], "label": _fmt_label(s["start"]), "text": s["text"].strip()}
+                    for s in segments if s["text"].strip()
+                ]
+            else:
+                chunks = _group_segments(segments, text_interval)
 
             txt_path = os.path.join(out_dir, f"{video_name}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 for chunk in chunks:
                     f.write(f"{chunk['label']}: {chunk['text']}\n\n")
             self._log(f"✓ Транскрипция сохранена: {os.path.basename(txt_path)}")
-            self._log(f"  Блоков по {TEXT_INTERVAL_SEC} сек: {len(chunks)}")
+            interval_label = "сегменты" if text_interval == 0 else f"{text_interval} сек"
+            self._log(f"  Блоков ({interval_label}): {len(chunks)}")
             self._ui(lambda: self.progress.set(0.4))
 
             # ── Шаг 2: скриншоты ─────────────────────────────────────────
