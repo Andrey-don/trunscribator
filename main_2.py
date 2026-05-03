@@ -1,8 +1,9 @@
 import os
 import json
 import html as html_mod
-import subprocess
 import threading
+import webbrowser
+from pathlib import Path
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -316,8 +317,8 @@ class App(ctk.CTk):
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
 
             # Открываем папку и HTML автоматически
-            subprocess.Popen(f'explorer "{out_dir}"')
-            subprocess.Popen(f'start "" "{html_path}"', shell=True)
+            os.startfile(out_dir)
+            webbrowser.open(Path(html_path).as_uri())
 
             self._ui(lambda: messagebox.showinfo(
                 "Готово",
