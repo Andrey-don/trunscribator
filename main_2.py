@@ -1,6 +1,7 @@
 import os
 import json
 import html as html_mod
+import subprocess
 import threading
 
 import customtkinter as ctk
@@ -313,6 +314,11 @@ class App(ctk.CTk):
 
             self._ui(lambda: self.progress.set(1.0))
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
+
+            # Открываем папку и HTML автоматически
+            subprocess.Popen(f'explorer "{out_dir}"')
+            subprocess.Popen(f'start "" "{html_path}"', shell=True)
+
             self._ui(lambda: messagebox.showinfo(
                 "Готово",
                 f"Обработка завершена!\n\n"
