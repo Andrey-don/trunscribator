@@ -1,9 +1,11 @@
 import os
 import json
+import base64
 import html as html_mod
+import shutil
+import subprocess
+import tempfile
 import threading
-import webbrowser
-from pathlib import Path
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -132,8 +134,16 @@ def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: lis
     for ev in events:
         if ev["type"] == "shot":
             shot = ev["data"]
-            if os.path.exists(os.path.join(out_dir, shot["filename"])):
-                parts.append(f'<img src="{shot["filename"]}" alt="{html_mod.escape(shot["label"])}">')
+            img_path = os.path.join(out_dir, shot["filename"])
+            if os.path.exists(img_path):
+                img = cv2.imread(img_path)
+                if img is not None:
+                    h, w = img.shape[:2]
+                    if w > 960:
+                        img = cv2.resize(img, (960, int(h * 960 / w)))
+                    _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    b64 = base64.b64encode(buf.tobytes()).decode('ascii')
+                    parts.append(f'<img src="data:image/jpeg;base64,{b64}" alt="{html_mod.escape(shot["label"])}">')
             parts.append(f'<div class="lbl">{html_mod.escape(shot["label"])}</div>')
         else:
             chunk = ev["data"]
@@ -144,7 +154,7 @@ def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: lis
 
     parts.append("</body></html>")
 
-    html_path = os.path.join(out_dir, f"{video_name}.html")
+    html_path = os.path.join(out_dir, "index.html")
     with open(html_path, "w", encoding="utf-8") as f:
         f.write("\n".join(parts))
     return html_path
@@ -316,9 +326,13 @@ class App(ctk.CTk):
             self._ui(lambda: self.progress.set(1.0))
             self._ui(lambda: self.status_label.configure(text="Готово!", text_color="green"))
 
-            # Открываем папку и HTML автоматически
-            os.startfile(out_dir)
-            webbrowser.open(Path(html_path).as_uri())
+            # Открываем папку в Explorer
+            subprocess.Popen(['explorer', os.path.normpath(out_dir)])
+
+            # Копируем HTML во временную папку с коротким ASCII-путём и открываем
+            temp_html = os.path.join(tempfile.gettempdir(), "trunscribator.html")
+            shutil.copy2(html_path, temp_html)
+            os.startfile(temp_html)
 
             self._ui(lambda: messagebox.showinfo(
                 "Готово",
