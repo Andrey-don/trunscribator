@@ -9,7 +9,7 @@ from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
 import whisper
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 
 
 ctk.set_appearance_mode("dark")
@@ -61,14 +61,14 @@ def _group_segments(segments: list, interval: int = TEXT_INTERVAL_SEC) -> list:
 
 
 def _generate_word(out_dir: str, video_name: str, chunks: list, screenshots: list) -> str:
-    """
-    chunks: [{"time_sec", "label", "text"}]  — текст по 10-сек интервалам
-    screenshots: [{"time_sec", "filename"}]  — скриншоты с именами-таймингами
-    """
     doc = Document()
-    doc.add_heading(video_name, level=1)
 
-    # Строим единую временну́ю шкалу: объединяем chunks и screenshots, сортируем по времени
+    title_p = doc.add_paragraph()
+    title_run = title_p.add_run(video_name)
+    title_run.bold = True
+    title_run.font.size = Pt(16)
+    title_run.font.color.rgb = RGBColor(0, 0, 0)
+
     events = []
     for c in chunks:
         events.append({"t": c["time_sec"], "type": "text", "data": c})
@@ -84,15 +84,20 @@ def _generate_word(out_dir: str, video_name: str, chunks: list, screenshots: lis
                 p = doc.add_paragraph()
                 p.alignment = 1
                 p.add_run().add_picture(img_path, width=Inches(5.5))
-            cap = doc.add_paragraph(shot["label"])
+            cap = doc.add_paragraph()
             cap.alignment = 1
-            cap.runs[0].bold = True
-            cap.runs[0].font.size = Pt(9)
+            cap_run = cap.add_run(shot["label"])
+            cap_run.bold = True
+            cap_run.font.size = Pt(9)
+            cap_run.font.color.rgb = RGBColor(0, 0, 0)
         else:
             chunk = ev["data"]
             p = doc.add_paragraph()
-            p.add_run(f"{chunk['label']}: ").bold = True
-            p.add_run(chunk["text"])
+            r1 = p.add_run(f"{chunk['label']}: ")
+            r1.bold = True
+            r1.font.color.rgb = RGBColor(0, 0, 0)
+            r2 = p.add_run(chunk["text"])
+            r2.font.color.rgb = RGBColor(0, 0, 0)
 
     docx_path = os.path.join(out_dir, f"{video_name}.docx")
     doc.save(docx_path)
@@ -248,6 +253,7 @@ class App(ctk.CTk):
 
             # ── Шаг 3: Word ───────────────────────────────────────────────
             self._ui(lambda: self.status_label.configure(text="Шаг 3/3 — Word-документ..."))
+            self._log(f"Данные для Word: блоков={len(chunks)}, скриншотов={len(screenshots)}")
             self._log("Генерация Word-документа...")
             docx_path = _generate_word(out_dir, video_name, chunks, screenshots)
             self._log(f"✓ Word сохранён: {os.path.basename(docx_path)}")
