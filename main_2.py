@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import re
 import threading
 import traceback
 
@@ -16,6 +17,13 @@ import cv2
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
 import whisper
+
+try:
+    import ollama as _ollama_lib
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    _ollama_lib = None
+    OLLAMA_AVAILABLE = False
 
 
 ctk.set_appearance_mode("dark")
@@ -67,7 +75,8 @@ def _group_segments(segments: list, interval: int = TEXT_INTERVAL_SEC) -> list:
 
 
 
-def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: list) -> str:
+def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: list,
+                   summary: str = None, keypoints: list = None) -> str:
     events = []
     for c in chunks:
         events.append({"t": c["time_sec"], "type": "text", "data": c})
@@ -84,9 +93,31 @@ def _generate_html(out_dir: str, video_name: str, chunks: list, screenshots: lis
         "img{max-width:100%;display:block;margin:16px auto;border:1px solid #ddd;}",
         ".lbl{text-align:center;font-size:11px;font-weight:bold;color:#555;margin:4px 0 20px;}",
         ".row{margin:6px 0;} .ts{font-weight:bold;}",
+        ".meta{background:#f4f7fb;border-left:4px solid #2d7dd2;padding:14px 18px;margin:0 0 20px;border-radius:0 6px 6px 0;}",
+        ".meta h2{font-size:14px;font-weight:bold;color:#2d7dd2;margin:0 0 8px;}",
+        ".meta p{margin:0;} .meta ol{margin:4px 0;padding-left:20px;} .meta li{margin:3px 0;}",
         "</style></head><body>",
         f"<h1>{html_mod.escape(video_name)}</h1>",
     ]
+
+    if summary:
+        parts.append('<div class="meta">')
+        parts.append('<h2>Краткое содержание</h2>')
+        parts.append(f'<p>{html_mod.escape(summary)}</p>')
+        parts.append('</div>')
+
+    if keypoints:
+        parts.append('<div class="meta">')
+        parts.append('<h2>Ключевые моменты</h2><ol>')
+        for kp in keypoints:
+            parts.append(
+                f'<li><span class="ts">{html_mod.escape(kp["label"])}</span>'
+                f' — {html_mod.escape(kp["text"])}</li>'
+            )
+        parts.append('</ol></div>')
+
+    if summary or keypoints:
+        parts.append('<hr style="margin:24px 0;border:none;border-top:1px solid #ddd;">')
 
     for ev in events:
         if ev["type"] == "shot":
@@ -121,7 +152,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Транскрибатор 2")
-        self.geometry("700x620")
+        self.geometry("700x720")
         self.resizable(False, False)
         self.video_path = None
         self._build_ui()
@@ -178,6 +209,29 @@ class App(ctk.CTk):
         self.html_switch = ctk.CTkSwitch(toggle_frame, text="HTML-отчёт")
         self.html_switch.select()
         self.html_switch.pack(side="left", padx=20, pady=10)
+        self.ollama_switch = ctk.CTkSwitch(toggle_frame, text="Улучшить текст (Ollama)",
+                                           command=self._on_ollama_toggle)
+        self.ollama_switch.pack(side="left", padx=20, pady=10)
+
+        ollama_frame = ctk.CTkFrame(self)
+        ollama_frame.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(ollama_frame, text="Модель Ollama:", width=140).pack(side="left", padx=10, pady=8)
+        self.ollama_model_entry = ctk.CTkEntry(ollama_frame, width=180, placeholder_text="gemma3:12b")
+        self.ollama_model_entry.insert(0, "gemma3:12b")
+        self.ollama_model_entry.configure(state="disabled")
+        self.ollama_model_entry.pack(side="left", padx=5)
+        if not OLLAMA_AVAILABLE:
+            ctk.CTkLabel(ollama_frame, text="⚠ pip install ollama",
+                         text_color="orange", font=ctk.CTkFont(size=11)).pack(side="left", padx=10)
+
+        ollama_opts_frame = ctk.CTkFrame(self)
+        ollama_opts_frame.pack(fill="x", padx=20, pady=4)
+        self.summary_switch = ctk.CTkSwitch(ollama_opts_frame, text="Краткое содержание",
+                                            state="disabled")
+        self.summary_switch.pack(side="left", padx=20, pady=8)
+        self.keypoints_switch = ctk.CTkSwitch(ollama_opts_frame, text="Ключевые моменты",
+                                              state="disabled")
+        self.keypoints_switch.pack(side="left", padx=20, pady=8)
 
         self.process_btn = ctk.CTkButton(self, text="Обработать", height=40,
                                          font=ctk.CTkFont(size=15, weight="bold"),
@@ -205,6 +259,12 @@ class App(ctk.CTk):
         state = "normal" if self.screenshots_switch.get() else "disabled"
         self.sens_slider.configure(state=state)
 
+    def _on_ollama_toggle(self):
+        state = "normal" if self.ollama_switch.get() else "disabled"
+        self.ollama_model_entry.configure(state=state)
+        self.summary_switch.configure(state=state)
+        self.keypoints_switch.configure(state=state)
+
     def select_video(self):
         path = filedialog.askopenfilename(
             title="Выберите видео",
@@ -227,6 +287,10 @@ class App(ctk.CTk):
             video_path = self.video_path
             do_screenshots = bool(self.screenshots_switch.get())
             do_html = bool(self.html_switch.get())
+            do_ollama = bool(self.ollama_switch.get())
+            do_summary = bool(self.summary_switch.get())
+            do_keypoints = bool(self.keypoints_switch.get())
+            ollama_model = self.ollama_model_entry.get().strip() or "gemma3:12b"
             text_interval = int(round(self.text_slider.get() / 5) * 5)
 
             video_name = os.path.splitext(os.path.basename(video_path))[0].strip()
@@ -274,6 +338,42 @@ class App(ctk.CTk):
             self._log(f"✓ Транскрипция сохранена: {os.path.basename(txt_path)}")
             interval_label = "сегменты" if text_interval == 0 else f"{text_interval} сек"
             self._log(f"  Блоков ({interval_label}): {len(chunks)}")
+            self._ui(lambda: self.progress.set(0.35))
+
+            # ── Шаг 1б: улучшение текста через Ollama ────────────────────
+            summary = None
+            keypoints = None
+            if do_ollama or do_summary or do_keypoints:
+                if not OLLAMA_AVAILABLE:
+                    self._log("⚠ Ollama: библиотека не установлена — pip install ollama")
+                else:
+                    if do_ollama:
+                        self._ui(lambda: self.status_label.configure(text="Улучшение текста (Ollama)..."))
+                        self._log(f"Улучшение текста через Ollama ({ollama_model})...")
+                        try:
+                            chunks = self._improve_text_ollama(chunks, ollama_model)
+                            with open(txt_path, "w", encoding="utf-8") as f:
+                                for chunk in chunks:
+                                    f.write(f"{chunk['label']}: {chunk['text']}\n\n")
+                            self._log("✓ Текст улучшен и перезаписан")
+                        except Exception as e:
+                            self._log(f"⚠ Ollama (улучшение): {e}")
+                    if do_summary:
+                        self._ui(lambda: self.status_label.configure(text="Краткое содержание (Ollama)..."))
+                        self._log(f"Краткое содержание через Ollama ({ollama_model})...")
+                        try:
+                            summary = self._summarize_with_ollama(chunks, ollama_model)
+                            self._log("✓ Краткое содержание готово")
+                        except Exception as e:
+                            self._log(f"⚠ Ollama (содержание): {e}")
+                    if do_keypoints:
+                        self._ui(lambda: self.status_label.configure(text="Ключевые моменты (Ollama)..."))
+                        self._log(f"Ключевые моменты через Ollama ({ollama_model})...")
+                        try:
+                            keypoints = self._keypoints_with_ollama(chunks, ollama_model)
+                            self._log(f"✓ Ключевых моментов: {len(keypoints)}")
+                        except Exception as e:
+                            self._log(f"⚠ Ollama (моменты): {e}")
             self._ui(lambda: self.progress.set(0.4))
 
             # ── Шаг 2: скриншоты ─────────────────────────────────────────
@@ -320,7 +420,8 @@ class App(ctk.CTk):
             if do_html:
                 self._ui(lambda: self.status_label.configure(text="HTML-документ..."))
                 self._log("Генерация HTML-документа...")
-                html_path = _generate_html(out_dir, video_name, chunks, screenshots)
+                html_path = _generate_html(out_dir, video_name, chunks, screenshots,
+                                           summary=summary, keypoints=keypoints)
                 self._log(f"✓ HTML сохранён: {os.path.basename(html_path)}")
             else:
                 self._log("HTML-отчёт отключён — пропущено.")
@@ -351,6 +452,64 @@ class App(ctk.CTk):
             self._ui(lambda: self.status_label.configure(text="Ошибка", text_color="red"))
         finally:
             self._ui(lambda: self.process_btn.configure(state="normal"))
+
+    def _improve_text_ollama(self, chunks: list, model: str) -> list:
+        if not chunks:
+            return chunks
+        numbered = "\n".join(f"{i + 1}. {c['text']}" for i, c in enumerate(chunks))
+        prompt = (
+            "Исправь ошибки автоматического распознавания речи в каждой строке.\n"
+            "Верни ответ строго в том же формате — нумерованный список с теми же номерами.\n"
+            "Не добавляй и не убирай строки. Верни только список, без пояснений.\n\n"
+            + numbered
+        )
+        response = _ollama_lib.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        corrected = response["message"]["content"].strip()
+        result = [dict(c) for c in chunks]
+        for line in corrected.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r"^(\d+)[.)]\s+(.*)", line)
+            if m:
+                idx = int(m.group(1)) - 1
+                if 0 <= idx < len(result):
+                    result[idx]["text"] = m.group(2).strip()
+        return result
+
+    def _summarize_with_ollama(self, chunks: list, model: str) -> str:
+        full_text = "\n".join(f"{c['label']}: {c['text']}" for c in chunks)
+        prompt = (
+            "Ты получаешь транскрипцию видео. Напиши краткое содержание в 3–5 предложениях "
+            "на русском языке. Верни только само содержание, без вводных слов и пояснений.\n\n"
+            + full_text
+        )
+        response = _ollama_lib.chat(model=model, messages=[{"role": "user", "content": prompt}])
+        return response["message"]["content"].strip()
+
+    def _keypoints_with_ollama(self, chunks: list, model: str) -> list:
+        full_text = "\n".join(f"{c['label']}: {c['text']}" for c in chunks)
+        prompt = (
+            "Ты получаешь транскрипцию видео с временными метками (формат ЧЧ ММ СС).\n"
+            "Выдели 5–10 ключевых моментов. Для каждого укажи временную метку из текста "
+            "и краткое описание (до 10 слов).\n"
+            "Формат — строго нумерованный список:\n"
+            "1. ЧЧ ММ СС — описание\n"
+            "2. ЧЧ ММ СС — описание\n"
+            "Только список, без вводных слов и пояснений.\n\n"
+            + full_text
+        )
+        response = _ollama_lib.chat(model=model, messages=[{"role": "user", "content": prompt}])
+        result = []
+        for line in response["message"]["content"].strip().split("\n"):
+            line = line.strip()
+            m = re.match(r"^\d+[.)]\s+(\d{2}\s\d{2}\s\d{2})\s*[—\-]\s*(.+)", line)
+            if m:
+                result.append({"label": m.group(1), "text": m.group(2).strip()})
+        return result
 
     def _detect_scenes(self, video_path: str, threshold: float) -> list[int]:
         video = open_video(video_path)
