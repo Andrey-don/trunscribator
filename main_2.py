@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import traceback
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -234,9 +235,10 @@ class App(ctk.CTk):
             self._ui(lambda: self.status_label.configure(text="Транскрибация..."))
             model_name = WHISPER_MODELS[self.model_var.get()]
             self._log(f"Загрузка модели Whisper «{model_name}»...")
+            self._log("  (первая загрузка модели скачивает файл — это может занять время)")
             model = whisper.load_model(model_name)
             self._log("Транскрибация видео...")
-            result = model.transcribe(video_path, verbose=None)
+            result = model.transcribe(video_path, verbose=None, fp16=False)
 
             segments = [
                 {"start": round(s["start"], 2), "end": round(s["end"], 2), "text": s["text"]}
@@ -331,6 +333,7 @@ class App(ctk.CTk):
 
         except Exception as e:
             self._log(f"ОШИБКА: {e}")
+            self._log(traceback.format_exc())
             self._ui(lambda: self.status_label.configure(text="Ошибка", text_color="red"))
         finally:
             self._ui(lambda: self.process_btn.configure(state="normal"))
