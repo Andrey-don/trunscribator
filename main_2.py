@@ -1,9 +1,11 @@
+import io
 import os
 import json
 import base64
 import html as html_mod
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import traceback
@@ -235,8 +237,20 @@ class App(ctk.CTk):
             self._ui(lambda: self.status_label.configure(text="Транскрибация..."))
             model_name = WHISPER_MODELS[self.model_var.get()]
             self._log(f"Загрузка модели Whisper «{model_name}»...")
-            self._log("  (первая загрузка модели скачивает файл — это может занять время)")
-            model = whisper.load_model(model_name)
+            self._log("  (первая загрузка скачивает файл — подождите...)")
+            # pythonw.exe не имеет консоли: sys.stdout/stderr = None,
+            # из-за этого tqdm падает при скачивании модели.
+            # Подставляем заглушку на время загрузки.
+            _stdout, _stderr = sys.stdout, sys.stderr
+            if sys.stdout is None:
+                sys.stdout = io.StringIO()
+            if sys.stderr is None:
+                sys.stderr = io.StringIO()
+            try:
+                model = whisper.load_model(model_name)
+            finally:
+                sys.stdout, sys.stderr = _stdout, _stderr
+
             self._log("Транскрибация видео...")
             result = model.transcribe(video_path, verbose=None, fp16=False)
 
