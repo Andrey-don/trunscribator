@@ -5,6 +5,19 @@
 модели Ollama (8 ГБ) — модель берётся с флешки или внешнего диска.
 
 
+ГДЕ ВЗЯТЬ УСТАНОВЩИКИ
+----------------------
+Вариант А — уже есть на исходном компьютере:
+  C:\Users\profi\Documents\Project\trunscribator\installers\
+    online\install_online.bat       <- онлайн-установщик
+    hybrid\install_hybrid.bat       <- этот установщик
+    hybrid\ИНСТРУКЦИЯ.txt           <- этот файл
+
+Вариант Б — скачать с GitHub:
+  Онлайн:  https://raw.githubusercontent.com/Andrey-don/trunscribator/main/installers/online/install_online.bat
+  Гибрид:  https://raw.githubusercontent.com/Andrey-don/trunscribator/main/installers/hybrid/install_hybrid.bat
+
+
 ЧТО НУЖНО ПОДГОТОВИТЬ НА ИСХОДНОМ КОМПЬЮТЕРЕ
 ---------------------------------------------
 1. Найдите папку с моделями Ollama:
