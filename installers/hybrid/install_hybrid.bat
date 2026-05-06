@@ -15,31 +15,27 @@ set ZIP_URL=https://github.com/Andrey-don/trunscribator/archive/refs/heads/main.
 set ZIP_TMP=%TEMP%\trunscribator_dl.zip
 set UNZIP_TMP=%TEMP%\trunscribator_unzip
 set MODEL_SRC=%~dp0ollama_models
+set WHISPER_SRC=%~dp0whisper_models
 
-REM ── Проверка наличия папки с моделью ──────────────────────────────────────
+REM ── Проверка папок с моделями ─────────────────────────────────────────────
+echo  Проверка наличия моделей рядом с установщиком...
 if exist "%MODEL_SRC%" (
-    echo  [OK] Папка ollama_models найдена — модель будет скопирована локально
+    echo  [OK] ollama_models найдена — Ollama-модель будет скопирована локально
 ) else (
-    echo  [ПРЕДУПРЕЖДЕНИЕ] Папка ollama_models не найдена рядом с установщиком.
-    echo.
-    echo  Ожидается структура:
-    echo    install_hybrid.bat
-    echo    ollama_models\          ^<-- скопируйте сюда из источника
-    echo      blobs\
-    echo      manifests\
-    echo.
-    echo  Без папки модель будет скачана из интернета (~8 ГБ).
-    echo.
-    set /p CONTINUE=Продолжить со скачиванием? (y/n):
-    if /i "%CONTINUE%" neq "y" exit /b 0
+    echo  [!]  ollama_models не найдена — Ollama-модель будет скачана (~8 ГБ)
+)
+if exist "%WHISPER_SRC%" (
+    echo  [OK] whisper_models найдена — Whisper-модели будут скопированы локально
+) else (
+    echo  [!]  whisper_models не найдена — Whisper-модели скачаются при первом запуске
 )
 echo.
-echo  Нажмите любую клавишу для начала...
+echo  Нажмите любую клавишу для начала установки...
 pause >nul
 
 REM ── 1. Python ─────────────────────────────────────────────────────────────
 echo.
-echo  [1/6] Проверка Python...
+echo  [1/7] Проверка Python...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo  Устанавливаю Python 3.11...
@@ -47,6 +43,7 @@ if %errorlevel% neq 0 (
     if %errorlevel% neq 0 (
         echo  [ОШИБКА] Python не удалось установить.
         echo  Скачайте вручную: https://www.python.org/downloads/
+        echo  При установке отметьте "Add Python to PATH"
         pause
         exit /b 1
     )
@@ -58,7 +55,7 @@ echo  [OK] Python найден
 
 REM ── 2. ffmpeg ──────────────────────────────────────────────────────────────
 echo.
-echo  [2/6] Проверка ffmpeg...
+echo  [2/7] Проверка ffmpeg...
 ffmpeg -version >nul 2>&1
 if %errorlevel% neq 0 (
     echo  Устанавливаю ffmpeg...
@@ -74,10 +71,10 @@ if %errorlevel% neq 0 (
 
 REM ── 3. Приложение ─────────────────────────────────────────────────────────
 echo.
-echo  [3/6] Скачивание приложения с GitHub...
+echo  [3/7] Скачивание приложения с GitHub...
 curl -L --progress-bar -o "%ZIP_TMP%" "%ZIP_URL%"
 if %errorlevel% neq 0 (
-    echo  [ОШИБКА] Не удалось скачать. Нужен интернет для приложения.
+    echo  [ОШИБКА] Не удалось скачать. Нужен интернет для приложения (~50 МБ).
     pause
     exit /b 1
 )
@@ -91,7 +88,7 @@ echo  [OK] Приложение установлено в: %INSTALL_DIR%
 
 REM ── 4. Зависимости Python ─────────────────────────────────────────────────
 echo.
-echo  [4/6] Установка зависимостей Python (3-5 минут)...
+echo  [4/7] Установка зависимостей Python (3-5 минут)...
 cd /d "%INSTALL_DIR%"
 python -m venv .venv
 .venv\Scripts\pip install --quiet -r requirements.txt
@@ -105,7 +102,7 @@ echo  [OK] Зависимости установлены
 
 REM ── 5. Ollama ─────────────────────────────────────────────────────────────
 echo.
-echo  [5/6] Проверка Ollama...
+echo  [5/7] Проверка Ollama...
 ollama --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo  Устанавливаю Ollama...
@@ -123,21 +120,33 @@ if %errorlevel% neq 0 (
 
 REM ── 6. Модель Ollama ──────────────────────────────────────────────────────
 echo.
-echo  [6/6] Установка модели gemma3:12b...
+echo  [6/7] Установка модели Ollama (gemma3:12b)...
 if exist "%MODEL_SRC%" (
-    echo  Копирую модель с носителя (без скачивания)...
+    echo  Копирую модель с носителя — без скачивания...
     set OLLAMA_MODELS=%USERPROFILE%\.ollama\models
     if not exist "%OLLAMA_MODELS%" mkdir "%OLLAMA_MODELS%"
     xcopy /e /i /q /y "%MODEL_SRC%\blobs" "%OLLAMA_MODELS%\blobs\" >nul 2>&1
     xcopy /e /i /q /y "%MODEL_SRC%\manifests" "%OLLAMA_MODELS%\manifests\" >nul 2>&1
-    echo  [OK] Модель скопирована
+    echo  [OK] Модель Ollama скопирована
 ) else (
-    echo  Скачиваю модель из интернета (~8 ГБ)...
+    echo  Скачиваю модель из интернета (~8 ГБ, займёт 10-30 минут)...
     ollama pull gemma3:12b
     if %errorlevel% neq 0 (
-        echo  [ПРЕДУПРЕЖДЕНИЕ] Модель не скачана.
-        echo  Запустите вручную: ollama pull gemma3:12b
+        echo  [ПРЕДУПРЕЖДЕНИЕ] Модель не скачана. Запустите вручную: ollama pull gemma3:12b
     )
+)
+
+REM ── 7. Модели Whisper ─────────────────────────────────────────────────────
+echo.
+echo  [7/7] Установка моделей Whisper...
+if exist "%WHISPER_SRC%" (
+    echo  Копирую модели Whisper с носителя...
+    set WHISPER_CACHE=%USERPROFILE%\.cache\whisper
+    if not exist "%WHISPER_CACHE%" mkdir "%WHISPER_CACHE%"
+    xcopy /q /y "%WHISPER_SRC%\*.pt" "%WHISPER_CACHE%\" >nul 2>&1
+    echo  [OK] Модели Whisper скопированы
+) else (
+    echo  [OK] Модели Whisper скачаются автоматически при первом запуске
 )
 
 REM ── Ярлык на рабочем столе ───────────────────────────────────────────────
